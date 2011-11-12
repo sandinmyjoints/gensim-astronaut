@@ -1,3 +1,6 @@
+#!/usr/bin/env python
+# -*- coding: utf-8 -*-
+
 import string
 import sys
 import argparse
@@ -20,7 +23,7 @@ PUNCT_TRANS_TABLE = make_trans_table('-', " ", remove=PUNCT_CHARS)
 
 def make_tokenize_line_func(trans_table=PUNCT_TRANS_TABLE):
     def tokenize_line(line, trans_table=trans_table):
-        line = unicode(line).translate(trans_table)
+        line = unicode(line, encoding="iso8859").translate(trans_table)
         line = line.lower().split()
         return line
     return tokenize_line
@@ -59,11 +62,11 @@ class OptionalDictCorpus(interfaces.CorpusABC):
         text preprocessing, lowercasing, tokenizing etc.). There will be no further
         preprocessing of the words coming out of this function.
         """
-        for lineno, line in enumerate(getstream(self.input)):
+        for line in getstream(self.input):
             yield self.tokenize_line(line)
 
     def ibuild_dictionary(self):
-        dictionary = corpora.Dictionary(self.tokenize_line(line) for line in self.get_texts())
+        dictionary = corpora.Dictionary(text for text in self.get_texts())
 
         # remove stop words and words that appear only once
         stop_ids = [dictionary.token2id[stopword] for stopword in self.stoplist
@@ -76,15 +79,16 @@ class OptionalDictCorpus(interfaces.CorpusABC):
         return dictionary
             
     def __iter__(self):
-        for line in self.get_texts():
-            yield self.dictionary.doc2bow(self.tokenize_line(line))
+        for text in self.get_texts():
+            yield self.dictionary.doc2bow(text)
     
     def __len__(self):
         return sum(1 for doc in self)  
         
     def __getitem__(self, key):
-        # key is line number in the file
-        for i, line in enumerate(self.get_texts()):
+        # return the original line from the input
+        # key is line number in the file/index in the list/etc
+        for i, line in enumerate(getstream(self.input)):
             if i == key:
                 return line.strip()
 
@@ -93,7 +97,7 @@ class OptionalDictCorpus(interfaces.CorpusABC):
 
 def create_corpus_and_dictionary(file):
     print "Creating corpus and dictionary from <%s>." % file
-    corpus = IterativeFileCorpus(file)
+    corpus = OptionalDictCorpus(file)
     return corpus, corpus.dictionary
 
 def create_model(corpus, num_topics):
@@ -105,12 +109,12 @@ def run_query(corpus, dictionary, model, match_corpus, query_string):
     Dictionary
     Model
     
-    match_corpus is a corpus against which to compare the query string.
+    match_corpus is an OptionalDictCorpus against which to compare the query string.
     query_string is a string.
     
     """
 
-    query_vec_bow = dictionary.doc2bow(query_string.lower().split())
+    query_vec_bow = dictionary.doc2bow(match_corpus.tokenize_line(query_string))
     query_vec_lsi = model[query_vec_bow] # convert the query to LSI space, same space as the model the corpus went into
     # query_vec_lsi is the coordinates of the query in LSI space
 
@@ -125,7 +129,7 @@ def run_query(corpus, dictionary, model, match_corpus, query_string):
     pretty_results = tuple((match_corpus[sim[0]], float(sim[1])) for sim in sims)
 
     for i, pretty_result in enumerate(pretty_results):
-        tw = textwrap.fill("{0:d}. ({1: 0.2g}) '{2:s}'".format(i+1, pretty_result[1], pretty_result[0]), initial_indent="  ", subsequent_indent="  ")
+        tw = textwrap.fill("{0:d}. ({1: 0.2f}) '{2:s}'".format(i+1, pretty_result[1], pretty_result[0]), initial_indent="  ", subsequent_indent="  ")
         print tw
 
 
@@ -140,12 +144,22 @@ def loop_query(corpus, dictionary, model, possible_matches=None, query=None):
         if query_lower in DONE_WORDS:
             break
         elif query_lower.startswith("topics "):
-            pass
+            cmd = query.split()
+            if len(cmd) == 3:
+                try:
+                    for i, topic in enumerate(model.show_topics(num_topics=int(cmd[1]), num_words=int(cmd[2]))):
+                        print "{0:d}. <{1}>".format(i, topic)
+                except Exception, ex:
+                    print ex
+                    print "Usage: topics <num_topics> <num_words_per_topic>"
         elif query_lower.startswith("distance "):
             cmd = query.split()
             if len(cmd) == 3:
-                match_against = IterativeFileCorpus([cmd[2]], dictionary=dictionary)
-                run_query(corpus, dictionary, model, match_against, cmd[1])
+                try:
+                    match_against = IterativeFileCorpus([cmd[2]], dictionary=dictionary)
+                    run_query(corpus, dictionary, model, match_against, cmd[1])
+                except Exception:
+                    print "Usage: distance <term1> <term2>"
         elif possible_matches:
             run_query(corpus, dictionary, model, possible_matches, query)
 
@@ -157,24 +171,22 @@ def save(corpus, dictionary, model, corpus_filename, dict_filename, model_filena
     dictionary.save(dict_filename) # store the dictionary, for future reference
     model.save(model_filename) # same for tfidf, lda, ...
     
-def load(corpus_file, dict_file, model_file):
+def load(corpus_file, dict_file, model_file, dictfromtext=False):
     print "Loading %s, %s, and %s." % (corpus_file, dict_file, model_file)
-    dictionary = corpora.Dictionary.load(dict_file)
+    if dictfromtext:
+        dictionary = corpora.Dictionary.load_from_text(dict_file)
+    else:
+        dictionary = corpora.Dictionary.load(dict_file)
     corpus = corpora.MmCorpus(corpus_file)
-    lsi = models.LsiModel.load(model_file)
+    model = models.LsiModel.load(model_file)
     
-    return corpus, dictionary, lsi
+    return corpus, dictionary, model
 
 def print_usage():
     print "Usage:"
     print "astronaut.py generate <corpus_text_file> <num_topics> <corpus_out_file> <dict_out_file> <model_out_file>"
     print "astronaut.py load <corpus_file> <dict_file> <model_file> [candidate_corpus_file]"
-    
-def load_possible_matches(file):
-    with open(file) as f:
-        possible_matches = f.readlines()
-    return [pm.strip() for pm in possible_matches]
-    
+        
 def main():
     if len(sys.argv) < 4:
         print_usage()
@@ -195,7 +207,7 @@ def main():
             possible_matches_corpus = None
             if len(sys.argv) >= 6:
                 possible_matches_file = sys.argv[5]
-                possible_matches_corpus = IterativeFileCorpus(possible_matches_file, dictionary)
+                possible_matches_corpus = OptionalDictCorpus(possible_matches_file, dictionary=dictionary)
         
             loop_query(corpus, dictionary, model, possible_matches_corpus)
 
