@@ -10,58 +10,10 @@ DONE_WORDS = ["done", "exit", "quit", "q"]
 PUNCT_CHARS = ",.:;-'\"[]()"
 
 
-class NLTKCorpus(interfaces.CorpusABC):
-    """A corpus that iteratively reads from a text file containing lines of text.
-    """
-    
-    def __init__(self, nltk_corpus, dictionary=None):
-        self.stoplist = set(stopwords.words('english'))
-        self.nltk_corpus = nltk_corpus
-        if dictionary:
-            self.dictionary = dictionary
-        else:
-            self.dictionary = self.ibuild_dictionary(nltk_corpus)
-        # self.corpus = None
-        # self.corpus_lines = None
-        len_self = len(self)
-        print "%d lines in corpus." % len_self
-        if len_self < 40:
-            print enumerate(self)
-        
-    def ibuild_dictionary(self, nltk_corpus):
-        print "Building dictionary from <%s>. " % nltk_corpus, 
-        print "adding terms %s" % [word.lower() for sent in nltk_corpus.sents() for word in sent if word not in list(PUNCT_CHARS)]
-        dictionary = corpora.Dictionary(word.lower() for sent in nltk_corpus.sents() for word in sent if word not in list(PUNCT_CHARS))
-        # remove stop words and words that appear only once
-        stop_ids = [dictionary.token2id[stopword] for stopword in self.stoplist
-                    if stopword in dictionary.token2id]
-        once_ids = [tokenid for tokenid, docfreq in dictionary.dfs.iteritems() if docfreq == 1]
-        dictionary.filter_tokens(stop_ids + once_ids) # remove stop words and words that appear only once
-        dictionary.compactify() # remove gaps in id sequence after words that were removed        
-        print "%d terms in dictionary." % len(dictionary)
-        if len(dictionary) < 40:
-            print dictionary
-        return dictionary
-            
-    def __iter__(self):
-        for sent in self.nltk_corpus.sents():
-            yield self.dictionary.doc2bow(word.lower() for word in sent)
-    
-    def __len__(self):
-        return sum(1 for doc in self)  
-        
-    def __getitem__(self, key):
-        # key is line number in the file
-        with open(self.file) as f:
-            for i, line in enumerate(f):
-                if i == key:
-                    return line.strip()
-
-        raise KeyError
-        
-        
-class IterativeFileCorpus(corpora.TextCorpus):
-    """A corpus that iteratively reads from a text file containing lines of text.
+class OptionalDictCorpus(interfaces.CorpusABC):
+    """A corpus that can create its own dictionary or have another dictionary specified,
+    which is useful when you want to compare queries against a corpus in an already
+    computed space.
     """
     
     def __init__(self, file, dictionary=None):
