@@ -5,7 +5,6 @@ import string
 import sys
 import argparse
 import textwrap
-from gensim.corpora.textcorpus import getstream
 import nltk
 from nltk.corpus import stopwords
 from gensim import corpora, models, similarities, interfaces
@@ -30,6 +29,24 @@ def make_tokenize_line_func(trans_table=PUNCT_TRANS_TABLE):
 
 default_tokenize_line = make_tokenize_line_func()
 
+def getstream(input):
+    """
+    If input is a filename (string), return `open(input)`.
+    If input is a file-like object, reset it to the beginning with `input.seek(0)`.
+    If input is a list, tuple, etc., pass it on as result.
+    """
+    assert input is not None
+    if isinstance(input, basestring):
+        # input was a filename: open as text file
+        result = open(input)
+    else:
+        # input was a file-like object (BZ2, Gzip etc.); reset the stream to its beginning
+        result = input
+
+        if hasattr(result, "seek"):
+            result.seek(0)
+
+    return result
 
 class OptionalDictCorpus(interfaces.CorpusABC):
     """A corpus that can create its own dictionary or have another dictionary specified,
@@ -133,38 +150,48 @@ def run_query(corpus, dictionary, model, match_corpus, query_string):
         print tw
 
 
-def loop_query(corpus, dictionary, model, possible_matches=None, query=None):
+def loop_query(corpus, dictionary, model, possible_matches=None):
     while True:
-        if not query:
-            print "> ",
-            query = sys.stdin.readline().strip()
+        print "\n> ",
+        command = sys.stdin.readline().strip()
 
-        query_lower = query.lower()
+        command_lower = command.lower()
         
-        if query_lower in DONE_WORDS:
+        if command_lower in DONE_WORDS:
             break
-        elif query_lower.startswith("topics "):
-            cmd = query.split()
+
+        elif command_lower.startswith("vector "):
+            pass
+
+        elif command_lower.startswith("topics "):
+            cmd = command.split()
             if len(cmd) == 3:
                 try:
                     for i, topic in enumerate(model.show_topics(num_topics=int(cmd[1]), num_words=int(cmd[2]))):
-                        print "{0:d}. <{1}>".format(i, topic)
+                        print "Topic {0:d}. ({1})".format(i, topic)
+                    continue
                 except Exception, ex:
-                    print ex
-                    print "Usage: topics <num_topics> <num_words_per_topic>"
-        elif query_lower.startswith("distance "):
-            cmd = query.split()
+#                    print ex
+                    pass
+
+            print "Usage: topics <num_topics> <num_words_per_topic>"
+
+        elif command_lower.startswith("distance "):
+            cmd = command.split()
             if len(cmd) == 3:
                 try:
-                    match_against = IterativeFileCorpus([cmd[2]], dictionary=dictionary)
+                    match_against = OptionalDictCorpus([cmd[2]], dictionary=dictionary)
                     run_query(corpus, dictionary, model, match_against, cmd[1])
-                except Exception:
-                    print "Usage: distance <term1> <term2>"
-        elif possible_matches:
-            run_query(corpus, dictionary, model, possible_matches, query)
+                    continue
+                except Exception, ex:
+                    print ex
+                    pass
 
-        query =  None
-        
+            print "Usage: distance <term1> <term2>"
+            
+        elif possible_matches:
+            run_query(corpus, dictionary, model, possible_matches, command)
+
 def save(corpus, dictionary, model, corpus_filename, dict_filename, model_filename):
     print "Saving %s, %s, and %s." % (corpus_filename, dict_filename, model_filename)
     corpora.MmCorpus.serialize(corpus_filename, corpus) # store to disk, for later use
@@ -197,6 +224,7 @@ def main():
             corpus, dictionary = create_corpus_and_dictionary(sys.argv[2])
             model = create_model(corpus, sys.argv[3])
             save(corpus, dictionary, model, sys.argv[4], sys.argv[5], sys.argv[6])
+            loop_query(corpus, dictionary, model)
 
     elif sys.argv[1] == "load":
         if len(sys.argv) < 5:
