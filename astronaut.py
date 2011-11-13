@@ -1,5 +1,6 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
+from cmd import Cmd
 
 import string
 import sys
@@ -10,7 +11,6 @@ from nltk.corpus import stopwords
 from gensim import corpora, models, similarities, interfaces
 
 
-DONE_WORDS = ["done", "exit", "quit", "q"]
 PUNCT_CHARS = "!@#$%^&*`,.:;'\"[](){}"
 
 def make_trans_table(trans_from, trans_to, remove=""):
@@ -150,47 +150,59 @@ def run_query(corpus, dictionary, model, match_corpus, query_string):
         print tw
 
 
-def loop_query(corpus, dictionary, model, possible_matches=None):
-    while True:
-        print "\n> ",
-        command = sys.stdin.readline().strip()
+class AstronautCmd(Cmd):
 
-        command_lower = command.lower()
-        
-        if command_lower in DONE_WORDS:
-            break
+    def __init__(self, corpus, dictionary, model, possible_matches=None):
+        Cmd.__init__(self)
+        self.prompt = "> "
+        self.corpus = corpus
+        self.dictionary = dictionary
+        self.model = model
+        self.possible_matches = possible_matches
 
-        elif command_lower.startswith("vector "):
-            pass
+    def do_vector(self, command):
+        pass
 
-        elif command_lower.startswith("topics "):
-            cmd = command.split()
-            if len(cmd) == 3:
-                try:
-                    for i, topic in enumerate(model.show_topics(num_topics=int(cmd[1]), num_words=int(cmd[2]))):
-                        print "Topic {0:d}. ({1})".format(i, topic)
-                    continue
-                except Exception, ex:
-#                    print ex
-                    pass
+    def do_topics(self, command):
+       cmd = command.split()
+       if len(cmd) == 2:
+           try:
+               for i, topic in enumerate(self.model.show_topics(num_topics=int(cmd[0]), num_words=int(cmd[1]))):
+                   print "Topic {0:d}. ({1})".format(i, topic)
+               return
+           except Exception, ex:
+#                   print ex
+               pass
 
-            print "Usage: topics <num_topics> <num_words_per_topic>"
+       print "Usage: topics <num_topics> <num_words_per_topic>"
 
-        elif command_lower.startswith("distance "):
-            cmd = command.split()
-            if len(cmd) == 3:
-                try:
-                    match_against = OptionalDictCorpus([cmd[2]], dictionary=dictionary)
-                    run_query(corpus, dictionary, model, match_against, cmd[1])
-                    continue
-                except Exception, ex:
-                    print ex
-                    pass
+    def do_distance(self, command):
+        cmd = command.split()
+        if len(cmd) == 2:
+            try:
+                match_against = OptionalDictCorpus([cmd[1]], dictionary=self.dictionary)
+                run_query(self.corpus, self.dictionary, self.model, match_against, cmd[0])
+                return
+            except Exception, ex:
+                print ex
+                pass
 
-            print "Usage: distance <term1> <term2>"
-            
-        elif possible_matches:
-            run_query(corpus, dictionary, model, possible_matches, command)
+        print "Usage: distance <term1> <term2>"
+
+    def default(self, command):
+        if command in DONE_WORDS:
+            return True
+
+        run_query(self.corpus, self.dictionary, self.model, self.possible_matches, command)
+
+    def do_exit(self, command):
+        do_EOF(command)
+
+    def do_quit(self, command):
+        do_EOF(command)
+
+    def do_EOF(self, command):
+        return True
 
 def save(corpus, dictionary, model, corpus_filename, dict_filename, model_filename):
     print "Saving %s, %s, and %s." % (corpus_filename, dict_filename, model_filename)
@@ -237,7 +249,9 @@ def main():
                 possible_matches_file = sys.argv[5]
                 possible_matches_corpus = OptionalDictCorpus(possible_matches_file, dictionary=dictionary)
         
-            loop_query(corpus, dictionary, model, possible_matches_corpus)
+#            loop_query(corpus, dictionary, model, possible_matches_corpus)
+            astro_cmd = AstronautCmd(corpus, dictionary, model, possible_matches_corpus)
+            astro_cmd.cmdloop()
 
     else:
         print_usage()
